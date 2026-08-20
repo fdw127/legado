@@ -8,15 +8,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set-ver.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set version
+      - name: Set version (optional)
         id: set-ver
-        run: echo "version=$(date -d "8 hour" -u +3.%y.%m%d%H)" >> $GITHUB_OUTPUT
+        run: |
+          echo "version=$(date -d "8 hour" -u +3.%y.%m%d%H)" >> $GITHUB_OUTPUT
 
-      - name: Set up JDK 17
+      - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -25,11 +28,11 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build with Gradle
-        run: ./gradlew assembleappLegacyRelease   # 直接指定变体
+      - name: Build release APKs
+        run: ./gradlew assembleRelease   # 或者 assembleAppRelease，取决于你的变体
 
-      - name: Upload APK
+      - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: appLegacy-${{ steps.set-ver.outputs.version }}
+          name: legado_app_${{ steps.set-ver.outputs.version }}
           path: app/build/outputs/apk/*/release/*.apk
