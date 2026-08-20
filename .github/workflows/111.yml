@@ -14,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set version (optional)
+      - name: Set version (based on date)
         id: set-ver
         run: |
           echo "version=$(date -d "8 hour" -u +3.%y.%m%d%H)" >> $GITHUB_OUTPUT
@@ -28,11 +28,40 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build release APKs
-        run: ./gradlew assembleRelease   # 或者 assembleAppRelease，取决于你的变体
+      - name: Build all release APKs
+        # 根据项目实际变体，可改为 assembleRelease 或指定 productFlavors
+        run: ./gradlew assembleRelease
+
+      - name: Prepare APKs for artifact (rename and collect)
+        run: |
+          # 创建临时目录存放最终 APK
+          mkdir -p "$GITHUB_WORKSPACE/apk_artifacts"
+          
+          # 查找所有生成的 release APK (支持多架构/多风味)
+          find app/build/outputs/apk -name "*.apk" -type f | while read -r apk; do
+            # 获取文件名（不含路径）
+            filename=$(basename "$apk")
+            
+            # 应用重命名规则（与第一段逻辑一致）
+            if [[ "$filename" == *"新包名"* ]]; then
+              newname="${filename/新包名/release}"
+            else
+              newname="${filename/新共存/releaseA}"
+            fi
+            
+            # 追加测试版标识和版本号（去原 .apk 后缀后加）
+            base="${newname%.apk}"
+            final_name="${base}_测试版_${{ steps.set-ver.outputs.version }}.apk"
+            
+            # 复制并重命名到 artifacts 目录
+            cp "$apk" "$GITHUB_WORKSPACE/apk_artifacts/$final_name"
+          done
+          
+          # 列出最终文件以便检查
+          ls -la "$GITHUB_WORKSPACE/apk_artifacts"
 
       - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
           name: legado_app_${{ steps.set-ver.outputs.version }}
-          path: app/build/outputs/apk/*/release/*.apk
+          path: ${{ github.workspace }}/apk_artifacts/*.apk
