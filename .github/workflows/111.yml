@@ -1,4 +1,4 @@
-name: Build APK Only
+name: Build APKs Only
 
 on:
   push:
@@ -28,40 +28,32 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Build all release APKs
-        # 根据项目实际变体，可改为 assembleRelease 或指定 productFlavors
-        run: ./gradlew assembleRelease
-
-      - name: Prepare APKs for artifact (rename and collect)
+      # 构建所有需要的变体（示例中构建 app 和 appLegacy 两种 product flavor）
+      # 如果只有一种，请调整为 ./gradlew assembleRelease
+      - name: Build release APKs
         run: |
-          # 创建临时目录存放最终 APK
-          mkdir -p "$GITHUB_WORKSPACE/apk_artifacts"
-          
-          # 查找所有生成的 release APK (支持多架构/多风味)
+          ./gradlew assembleAppRelease assembleAppLegacyRelease
+
+      # 重命名 APK（模拟代码一中的逻辑）
+      - name: Rename APKs
+        run: |
+          mkdir -p apk_output
+          # 查找所有构建出的 APK（按变体目录）
           find app/build/outputs/apk -name "*.apk" -type f | while read -r apk; do
-            # 获取文件名（不含路径）
             filename=$(basename "$apk")
-            
-            # 应用重命名规则（与第一段逻辑一致）
+            # 根据文件名中的关键字替换（与代码一一致）
             if [[ "$filename" == *"新包名"* ]]; then
               newname="${filename/新包名/release}"
             else
               newname="${filename/新共存/releaseA}"
             fi
-            
-            # 追加测试版标识和版本号（去原 .apk 后缀后加）
-            base="${newname%.apk}"
-            final_name="${base}_测试版_${{ steps.set-ver.outputs.version }}.apk"
-            
-            # 复制并重命名到 artifacts 目录
-            cp "$apk" "$GITHUB_WORKSPACE/apk_artifacts/$final_name"
+            # 复制到统一输出目录，同时可添加版本后缀（可选）
+            cp "$apk" "apk_output/${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
           done
-          
-          # 列出最终文件以便检查
-          ls -la "$GITHUB_WORKSPACE/apk_artifacts"
 
+      # 上传所有重命名后的 APK 作为 Artifact
       - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: legado_app_${{ steps.set-ver.outputs.version }}
-          path: ${{ github.workspace }}/apk_artifacts/*.apk
+          name: legado_apks_${{ steps.set-ver.outputs.version }}
+          path: apk_output/*.apk
