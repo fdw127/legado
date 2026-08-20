@@ -1,4 +1,4 @@
-name: Build APKs Only
+name: Build Signed APKs
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set version (based on date)
+      - name: Set version (e.g., 3.24.0810)
         id: set-ver
         run: |
           echo "version=$(date -d "8 hour" -u +3.%y.%m%d%H)" >> $GITHUB_OUTPUT
@@ -28,32 +28,37 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # 构建所有需要的变体（示例中构建 app 和 appLegacy 两种 product flavor）
-      # 如果只有一种，请调整为 ./gradlew assembleRelease
-      - name: Build release APKs
+      # 构建所有需要的变体（例如 appRelease 和 appLegacyRelease 等）
+      - name: Build release variants
         run: |
-          ./gradlew assembleAppRelease assembleAppLegacyRelease
+          ./gradlew assembleRelease          # 默认变体
+          # 如果有其他变体，例如 appLegacy，加上：
+          # ./gradlew assembleAppLegacyRelease
 
-      # 重命名 APK（模拟代码一中的逻辑）
+      # 重命名 APK 并统一放入一个目录（避免第一套中的目录删除问题）
       - name: Rename APKs
         run: |
-          mkdir -p apk_output
-          # 查找所有构建出的 APK（按变体目录）
+          mkdir -p dist
+          # 查找所有生成的 release APK（多路径）
           find app/build/outputs/apk -name "*.apk" -type f | while read -r apk; do
             filename=$(basename "$apk")
-            # 根据文件名中的关键字替换（与代码一一致）
-            if [[ "$filename" == *"新包名"* ]]; then
-              newname="${filename/新包名/release}"
+            # 按照第一套的重命名规则（关键字替换）
+            # 假设变体名称中含有 "新包名" 或 "新共存"，但实际可能是变体名
+            # 这里可以根据实际变体名称替换，例如将 "app" 替换为 "release"，"appLegacy" 替换为 "releaseA"
+            # 为了模拟第一套，我们可以根据路径或文件名中的关键字替换
+            if [[ "$filename" == *"app"* ]]; then
+              newname="${filename/app/release}"
+            elif [[ "$filename" == *"appLegacy"* ]]; then
+              newname="${filename/appLegacy/releaseA}"
             else
-              newname="${filename/新共存/releaseA}"
+              newname="$filename"
             fi
-            # 复制到统一输出目录，同时可添加版本后缀（可选）
-            cp "$apk" "apk_output/${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
+            # 保留原始版本号，但可以追加版本标签
+            mv "$apk" "dist/${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
           done
 
-      # 上传所有重命名后的 APK 作为 Artifact
       - name: Upload APKs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: legado_apks_${{ steps.set-ver.outputs.version }}
-          path: apk_output/*.apk
+          name: legado_apps_${{ steps.set-ver.outputs.version }}
+          path: dist/*.apk
