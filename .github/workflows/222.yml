@@ -18,7 +18,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # 获取完整历史以便查找合并提交
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 配置 Git
@@ -31,7 +31,6 @@ jobs:
         run: |
           TARGET="${{ github.event.inputs.target_commit }}"
           if [ -z "$TARGET" ]; then
-            # 自动查找最近一次合并上游的提交（合并信息包含 "upstream/main"）
             TARGET=$(git log --merges --grep="upstream/main" -1 --format="%H")
             if [ -z "$TARGET" ]; then
               echo "❌ 未找到任何从上游合并的提交，无法自动回退。"
@@ -46,8 +45,7 @@ jobs:
       - name: 回退合并提交（撤销上游引入的更改）
         run: |
           TARGET="${{ steps.find_target.outputs.target }}"
-          # 使用 revert -m 1 保留本地分支历史，撤销合并带来的更改
-          git revert -m 1 $TARGET --no-edit
+          git revert -m 1 $TARGET --no-edit -X ours
           echo "✅ 已生成回退提交，撤销了合并 $TARGET"
 
       - name: 推送回退结果到远程仓库
