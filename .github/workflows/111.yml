@@ -14,7 +14,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 生成版本号（例如 3.24.0810）
       - name: Set version
         id: set-ver
         run: |
@@ -29,41 +28,41 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ---------- 签名配置（可选，如已配置可忽略） ----------
-      # 如果您的签名密钥存储在 GitHub Secrets 中，请取消注释以下步骤
+      # ---------- 签名配置（如需） ----------
+      # 如果您的签名密钥存储在 GitHub Secrets 中，取消注释以下步骤
       # - name: Decode keystore
       #   env:
       #     KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
       #   run: |
       #     echo "$KEYSTORE_BASE64" | base64 -d > app/keystore.jks
+      # 并确保在 app/build.gradle 中引用该密钥文件及密码（通过环境变量）
 
-      # ---------- 构建所有需要的风味 ----------
-      # 明确构建两个风味的 Release 变体
+      # ---------- 构建所有需要的变体 ----------
+      # 根据报错，至少存在 app，也可能有 appLegacy（请根据实际情况增减）
       - name: Build release APKs
         run: |
-          ./gradlew assemble新包名Release assemble新共存Release
-          # 如果风味名称是英文，请替换为实际名称，例如：
-          # ./gradlew assembleAppRelease assembleAppLegacyRelease
+          ./gradlew assembleAppRelease assembleAppLegacyRelease
+          # 如果只有一个变体，则只用 ./gradlew assembleAppRelease
 
-      # ---------- 重命名 APK（完全按照第一套逻辑） ----------
+      # ---------- 重命名 APK ----------
       - name: Rename APKs
         run: |
           mkdir -p dist
-          # 查找所有生成的 APK（可能分布在不同的架构子目录中）
           find app/build/outputs/apk -name "*.apk" -type f | while read -r apk; do
             filename=$(basename "$apk")
-            # 按照您的原规则：包含"新包名" → 替换为"release"
-            # 否则（即包含"新共存"）→ 替换为"releaseA"
-            if [[ "$filename" == *新包名* ]]; then
-              newname="${filename/新包名/release}"
+            # 根据实际 flavor 名称替换
+            if [[ "$filename" == *"app"* ]]; then
+              newname="${filename/app/release}"
+            elif [[ "$filename" == *"appLegacy"* ]]; then
+              newname="${filename/appLegacy/releaseA}"
             else
-              newname="${filename/新共存/releaseA}"
+              newname="$filename"   # 保底，不重命名
             fi
-            # 追加版本号后缀，保持原扩展名
+            # 追加版本号后缀
             mv "$apk" "dist/${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
           done
 
-      # ---------- 上传 APK 作为 Artifact ----------
+      # ---------- 上传 APK ----------
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
