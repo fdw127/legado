@@ -1,0 +1,45 @@
+name: Release 兼容版
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    outputs:
+      version: ${{ steps.set-ver.outputs.version }}
+    steps:
+      - id: set-ver
+        run: |
+          echo "version=$(date -d "8 hour" -u +3.%y.%m%d%H)" >> $GITHUB_OUTPUT
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      product: appLegacy                    # 与您的原始构建保持一致
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build with Gradle
+        run: ./gradlew assemble${product}Release
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.product }}-${{ env.VERSION }}
+          path: app/build/outputs/apk/*/release/*.apk
