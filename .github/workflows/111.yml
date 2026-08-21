@@ -8,17 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # 定义两种构建变体，对应官方的“新包名”与“新共存”
-        type: [release, releaseA]
-        # 根据官方逻辑，type 为 release 时 product 对应“新包名”，type 为 releaseA 时对应“新共存”
-        include:
-          - type: release
-            product: 新包名
-          - type: releaseA
-            product: 新共存
-
     outputs:
       version: ${{ steps.set-ver.outputs.version }}
     steps:
@@ -37,51 +26,46 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      # ---------- 签名配置（官方方案） ----------
-      - name: Setup APK Signing
-        run: |
-          # 1. 解码密钥库文件（需在 Secrets 中配置 RELEASE_KEY_STORE）
-          echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/app/legado.jks
-          # 2. 将签名信息写入 gradle.properties（Gradle 构建时会自动读取）
-          {
-            echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}"
-            echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}"
-            echo "RELEASE_STORE_FILE=./legado.jks"
-            echo "RELEASE_KEY_ALIAS=legado"
-          } >> $GITHUB_WORKSPACE/gradle.properties
-
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ---------- 构建对应变体的 APK ----------
-      # 使用 -Pproduct 参数传递变体标识（需 build.gradle 支持该参数），
-      # 若项目已定义 flavor “新包名”和“新共存”，也可直接使用 assemble新包名Release 等，
-      # 但官方采用动态参数方式，兼容性更好。
-      - name: Build release APK (${{ matrix.type }})
+      # ---------- 签名配置（直接使用仓库根目录的 legado.jks） ----------
+      - name: Setup APK Signing
         run: |
-          ./gradlew :app:assembleRelease -Pproduct=${{ matrix.product }}
+          # 将签名配置写入 gradle.properties，Gradle 构建时会自动读取
+          {
+            echo "RELEASE_KEY_ALIAS=legado"
+            echo "RELEASE_KEY_PASSWORD=legado"
+            echo "RELEASE_STORE_PASSWORD=legado"
+            echo "RELEASE_STORE_FILE=../legado.jks"
+          } >> gradle.properties
+
+      # ---------- 构建 app 风味的所有 Release APK ----------
+      - name: Build release APKs
+        run: |
+          ./gradlew assembleAppRelease
 
       # ---------- 重命名 APK ----------
-      - name: Rename APK (${{ matrix.type }})
+      - name: Rename APKs
         run: |
-          # 将生成的 APK 移至根目录并重命名（完全遵循官方 BetaRelease.yml 规则）
-          mv app/build/outputs/apk/*/release/*.apk .
-          # 删除空子目录（可选）
-          rm -rf app/build/outputs/apk/*/release
-          for file in *.apk; do
-            if [[ "$file" = *新包名* ]]; then
-              newname="${file/新包名/release}"
+          mkdir -p dist
+          find app/build/outputs/apk/app/release -name "*.apk" -type f | while read -r apk; do
+            filename=$(basename "$apk")
+            if [[ "$filename" =~ ^app-(.+)-release\.apk$ ]]; then
+              arch="${BASH_REMATCH[1]}"
+              newname="release_${arch}_${{ steps.set-ver.outputs.version }}.apk"
+            elif [[ "$filename" == "app-release.apk" ]]; then
+              newname="release_universal_${{ steps.set-ver.outputs.version }}.apk"
             else
-              newname="${file/新共存/releaseA}"
+              newname="${filename/app/release}"
+              newname="${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
             fi
-            # 追加版本号后缀
-            mv -- "$file" "${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
+            mv "$apk" "dist/$newname"
           done
 
-      # ---------- 上传 APK 作为 Artifact ----------
-      - name: Upload APK (${{ matrix.type }})
+      # ---------- 上传 APK ----------
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: legado_app_${{ matrix.type }}_${{ steps.set-ver.outputs.version }}
-          path: |
-            *.apk
+          name: legado_apps_${{ steps.set-ver.outputs.version }}
+          path: dist/*.apk
