@@ -14,7 +14,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 生成版本号（格式：3.年.月日时）
       - name: Set version
         id: set-ver
         run: |
@@ -29,23 +28,37 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ---------- 签名配置（直接使用仓库根目录的 legado.jks） ----------
+      - name: Verify keystore
+        run: |
+          if [ ! -f "legado.jks" ]; then
+            echo "❌ legado.jks not found in root directory"
+            exit 1
+          fi
+          echo "✅ legado.jks found"
+          if keytool -list -keystore legado.jks -storepass legado -alias legado > /dev/null 2>&1; then
+            echo "✅ Keystore can be read with password 'legado'"
+          else
+            echo "❌ Failed to read keystore with password 'legado'"
+            echo "Please set correct passwords via Secrets or modify the script."
+            exit 1
+          fi
+
       - name: Setup APK Signing
         run: |
-          # 将签名配置写入 gradle.properties，Gradle 构建时会自动读取
           {
             echo "RELEASE_KEY_ALIAS=legado"
-            echo "RELEASE_KEY_PASSWORD=legado"
-            echo "RELEASE_STORE_PASSWORD=legado"
-            echo "RELEASE_STORE_FILE=../legado.jks"
+            echo "RELEASE_KEY_PASSWORD=${RELEASE_KEY_PASSWORD:-legado}"
+            echo "RELEASE_STORE_PASSWORD=${RELEASE_STORE_PASSWORD:-legado}"
+            echo "RELEASE_STORE_FILE=./legado.jks"
           } >> gradle.properties
+        env:
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
 
-      # ---------- 构建 app 风味的所有 Release APK ----------
       - name: Build release APKs
         run: |
           ./gradlew assembleAppRelease
 
-      # ---------- 重命名 APK ----------
       - name: Rename APKs
         run: |
           mkdir -p dist
@@ -63,7 +76,6 @@ jobs:
             mv "$apk" "dist/$newname"
           done
 
-      # ---------- 上传 APK ----------
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
