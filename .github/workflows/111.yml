@@ -8,6 +8,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 定义两种构建变体，对应官方的“新包名”与“新共存”
+        type: [release, releaseA]
+        # 根据官方逻辑，type 为 release 时 product 对应“新包名”，type 为 releaseA 时对应“新共存”
+        include:
+          - type: release
+            product: 新包名
+          - type: releaseA
+            product: 新共存
+
     outputs:
       version: ${{ steps.set-ver.outputs.version }}
     steps:
@@ -26,51 +37,51 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # ---------- 签名配置（官方方案） ----------
+      - name: Setup APK Signing
+        run: |
+          # 1. 解码密钥库文件（需在 Secrets 中配置 RELEASE_KEY_STORE）
+          echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/app/legado.jks
+          # 2. 将签名信息写入 gradle.properties（Gradle 构建时会自动读取）
+          {
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}"
+            echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}"
+            echo "RELEASE_STORE_FILE=./legado.jks"
+            echo "RELEASE_KEY_ALIAS=legado"
+          } >> $GITHUB_WORKSPACE/gradle.properties
+
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      # ---------- 签名密钥解码（如果您的密钥存储在 Secrets 中） ----------
-      # 如果您还没有配置签名，请先完成 Gradle 签名配置，并将密钥文件 Base64 存入 GitHub Secrets
-      # - name: Decode keystore
-      #   env:
-      #     KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      #   run: |
-      #     echo "$KEYSTORE_BASE64" | base64 -d > app/keystore.jks
-      # 并在 app/build.gradle 中引用该文件及密码（通过环境变量）
-
-      # ---------- 构建 app 风味的所有 Release APK ----------
-      - name: Build release APKs
+      # ---------- 构建对应变体的 APK ----------
+      # 使用 -Pproduct 参数传递变体标识（需 build.gradle 支持该参数），
+      # 若项目已定义 flavor “新包名”和“新共存”，也可直接使用 assemble新包名Release 等，
+      # 但官方采用动态参数方式，兼容性更好。
+      - name: Build release APK (${{ matrix.type }})
         run: |
-          ./gradlew assembleAppRelease
+          ./gradlew :app:assembleRelease -Pproduct=${{ matrix.product }}
 
       # ---------- 重命名 APK ----------
-      # 假设 APK 位于 app/build/outputs/apk/app/release/ 下
-      # 文件名格式通常为 app-<架构>-release.apk 或 app-release.apk（通用）
-      - name: Rename APKs
+      - name: Rename APK (${{ matrix.type }})
         run: |
-          mkdir -p dist
-          find app/build/outputs/apk/app/release -name "*.apk" -type f | while read -r apk; do
-            filename=$(basename "$apk")
-            # 去掉开头的 "app-" 和结尾的 "-release"（如果有）
-            # 例如 app-arm64-v8a-release.apk → arm64-v8a
-            # 或者 app-release.apk → （无架构）
-            if [[ "$filename" =~ ^app-(.+)-release\.apk$ ]]; then
-              arch="${BASH_REMATCH[1]}"
-              newname="release_${arch}_${{ steps.set-ver.outputs.version }}.apk"
-            elif [[ "$filename" == "app-release.apk" ]]; then
-              # 通用包（可能包含所有架构）
-              newname="release_universal_${{ steps.set-ver.outputs.version }}.apk"
+          # 将生成的 APK 移至根目录并重命名（完全遵循官方 BetaRelease.yml 规则）
+          mv app/build/outputs/apk/*/release/*.apk .
+          # 删除空子目录（可选）
+          rm -rf app/build/outputs/apk/*/release
+          for file in *.apk; do
+            if [[ "$file" = *新包名* ]]; then
+              newname="${file/新包名/release}"
             else
-              # 保底：直接替换 app 为 release
-              newname="${filename/app/release}"
-              newname="${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
+              newname="${file/新共存/releaseA}"
             fi
-            mv "$apk" "dist/$newname"
+            # 追加版本号后缀
+            mv -- "$file" "${newname%.apk}_${{ steps.set-ver.outputs.version }}.apk"
           done
 
-      # ---------- 上传 APK ----------
-      - name: Upload APKs
+      # ---------- 上传 APK 作为 Artifact ----------
+      - name: Upload APK (${{ matrix.type }})
         uses: actions/upload-artifact@v4
         with:
-          name: legado_apps_${{ steps.set-ver.outputs.version }}
-          path: dist/*.apk
+          name: legado_app_${{ matrix.type }}_${{ steps.set-ver.outputs.version }}
+          path: |
+            *.apk
